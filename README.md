@@ -97,30 +97,33 @@ In this environment, ScrapeCreator MCP serves as the reference benchmark:
 
 ---
 
-## 5. Installation & Setup (Windows)
+## 5. Quick Start (1-Click Automated Setup)
 
-### Prerequisites
-- Python 3.10+ (tested on Python 3.12)
-- Git Bash or Windows PowerShell
+Cukup jalankan satu perintah berikut di PowerShell atau Terminal. Script akan otomatis membuat virtual environment, menginstal dependensi (`yt-dlp`, `playwright`, `mcp`), mengunduh headless browser, dan mendaftarkan server langsung ke config Claude Desktop Anda:
 
-### 1. Create Virtual Environment
+### Windows (PowerShell)
+```powershell
+git clone https://github.com/hasanzain/ContentScrapper.git; cd ContentScrapper; .\install.ps1
+```
+
+### macOS / Linux / Manual Python
+```bash
+git clone https://github.com/hasanzain/ContentScrapper.git
+cd ContentScrapper
+python install.py
+```
+
+Setelah selesai, cukup **Restart Claude Desktop**. Tool `scrape_tiktok_video`, `get_tiktok_transcript`, `search_tiktok_videos`, dan `search_tiktok_mobile` langsung aktif dan siap digunakan.
+
+---
+
+### Manual Setup (Opsional)
+Jika Anda ingin menyiapkan manual langkah demi langkah:
 ```powershell
 python -m venv venv
-```
-
-### 2. Activate Virtual Environment
-In PowerShell:
-```powershell
 .\venv\Scripts\Activate.ps1
-```
-In Git Bash:
-```bash
-source venv/Scripts/activate
-```
-
-### 3. Install Dependencies
-```powershell
-.\venv\Scripts\python.exe -m pip install -r requirements.txt
+pip install -r requirements.txt
+python -m playwright install chromium-headless-shell
 ```
 
 ---
