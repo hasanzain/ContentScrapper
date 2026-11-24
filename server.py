@@ -11,7 +11,7 @@ logger = get_logger("server")
 
 # Initialize FastMCP Server
 mcp = FastMCP(
-    "tiktok-scraper",
+    "content-scrapper",
     dependencies=["yt-dlp", "httpx", "playwright"],
 )
 

@@ -64,8 +64,8 @@ def main():
             str(venv_python), "-m", "playwright", "install", "chromium"
         ])
 
-    # 4. Configure Claude Desktop MCP
-    print("\n[4/4] Registering MCP Server to Claude Desktop config...")
+    # 4. Configure Claude Desktop & Claude Code MCP
+    print("\n[4/4] Registering 'content-scrapper' MCP Server...")
     config_path = get_claude_config_path()
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -79,7 +79,9 @@ def main():
     mcp_servers = config_data.setdefault("mcpServers", {})
 
     server_script = project_root / "server.py"
-    mcp_servers["tiktok-scraper"] = {
+    # Clean up old key if present
+    mcp_servers.pop("tiktok-scraper", None)
+    mcp_servers["content-scrapper"] = {
         "command": str(venv_python),
         "args": [str(server_script)],
     }
@@ -87,8 +89,21 @@ def main():
     config_path.write_text(json.dumps(config_data, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Updated Claude Desktop config: {config_path}")
 
+    # Also register to Claude Code CLI if available
+    try:
+        subprocess.run(
+            ["claude", "mcp", "add", "-s", "user", "content-scrapper", str(venv_python), str(server_script)],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        print("Registered 'content-scrapper' to Claude Code user scope.")
+    except Exception:
+        pass
+
     print("\n" + "=" * 60)
-    print("  [SUCCESS] TikTok Scraper MCP is successfully installed!")
+    print("  [SUCCESS] 'content-scrapper' MCP is successfully installed!")
+    print(f"  Name:   content-scrapper")
     print(f"  Server: {server_script}")
     print(f"  Python: {venv_python}")
     print("  Action required: Restart Claude Desktop app to activate.")

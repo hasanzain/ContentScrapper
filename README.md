@@ -242,7 +242,7 @@ Add the local server to your `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "tiktok-scraper": {
+    "content-scrapper": {
       "command": "F:\\Hasan\\SANDBOX\\ContentScrapper\\venv\\Scripts\\python.exe",
       "args": [
         "F:\\Hasan\\SANDBOX\\ContentScrapper\\server.py"
