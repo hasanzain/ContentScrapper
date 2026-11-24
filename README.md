@@ -99,7 +99,12 @@ In this environment, ScrapeCreator MCP serves as the reference benchmark:
 
 ## 5. Quick Start (1-Click Automated Setup)
 
-Cukup jalankan satu perintah berikut di PowerShell atau Terminal. Script akan otomatis membuat virtual environment, menginstal dependensi (`yt-dlp`, `playwright`, `mcp`), mengunduh headless browser, dan mendaftarkan server langsung ke config Claude Desktop Anda:
+Cukup jalankan satu perintah berikut di Command Prompt (CMD), PowerShell, atau Terminal. Script akan otomatis membuat virtual environment, menginstal dependensi (`yt-dlp`, `playwright`, `mcp`), mengunduh headless browser, dan mendaftarkan server langsung ke config Claude Desktop Anda:
+
+### Windows (Command Prompt / CMD)
+```cmd
+git clone https://github.com/hasanzain/ContentScrapper.git && cd ContentScrapper && install.bat
+```
 
 ### Windows (PowerShell)
 ```powershell
