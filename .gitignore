@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Testing & QA benchmark run artifacts
+.pytest_cache/
+qa/results/
+.coverage
+htmlcov/
+
+# Local configuration & IDEs
+.claude/
+.vscode/
+.idea/
+
+# Graphify knowledge graph outputs
+graphify-out/
+
+# Environment variables & secrets
+.env
+.env.*
+*.log

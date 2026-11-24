@@ -1,0 +1,9 @@
+# Benchmark TikTok Test URLs
+# Category: VIDEO_WITH_SUBTITLE & SOUND
+https://www.tiktok.com/@ophia.roserose/video/7703050842051579158
+
+# Category: NORMAL_VIDEO & SOUND (NO SUBTITLE)
+https://www.tiktok.com/@nathanielbrennan0401/video/7710459855974321422
+
+# Category: SHORT_VIDEO
+https://www.tiktok.com/@yanepridumaluser/video/7711403482976210183
