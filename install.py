@@ -6,18 +6,26 @@ import sys
 from pathlib import Path
 
 
-def get_claude_config_path() -> Path:
-    """Resolve Claude Desktop configuration file path across operating systems."""
+def get_claude_config_paths() -> list[Path]:
+    """Resolve Claude Desktop configuration file paths across operating systems and variants (standard & 3p/dev)."""
     system = platform.system()
+    paths: list[Path] = []
     if system == "Windows":
-        appdata = os.environ.get("APPDATA")
-        if not appdata:
-            appdata = str(Path.home() / "AppData" / "Roaming")
-        return Path(appdata) / "Claude" / "claude_desktop_config.json"
+        appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        localappdata = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+
+        # Standard Claude Desktop (Roaming)
+        paths.append(Path(appdata) / "Claude" / "claude_desktop_config.json")
+        # Claude 3p / Developer / Enterprise variants
+        paths.append(Path(localappdata) / "Claude-3p" / "claude_desktop_config.json")
+        paths.append(Path(appdata) / "Claude-3p" / "claude_desktop_config.json")
     elif system == "Darwin":
-        return Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+        paths.append(Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json")
+        paths.append(Path.home() / "Library" / "Application Support" / "Claude-3p" / "claude_desktop_config.json")
     else:
-        return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+        paths.append(Path.home() / ".config" / "Claude" / "claude_desktop_config.json")
+        paths.append(Path.home() / ".config" / "Claude-3p" / "claude_desktop_config.json")
+    return paths
 
 
 def main():
@@ -66,28 +74,48 @@ def main():
 
     # 4. Configure Claude Desktop & Claude Code MCP
     print("\n[4/4] Registering 'content-scrapper' MCP Server...")
-    config_path = get_claude_config_path()
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    config_data = {}
-    if config_path.exists():
-        try:
-            config_data = json.loads(config_path.read_text(encoding="utf-8"))
-        except Exception:
-            config_data = {}
-
-    mcp_servers = config_data.setdefault("mcpServers", {})
-
     server_script = project_root / "server.py"
-    # Clean up old key if present
-    mcp_servers.pop("tiktok-scraper", None)
-    mcp_servers["content-scrapper"] = {
-        "command": str(venv_python),
-        "args": [str(server_script)],
-    }
+    config_paths = get_claude_config_paths()
 
-    config_path.write_text(json.dumps(config_data, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"Updated Claude Desktop config: {config_path}")
+    updated_any = False
+    for config_path in config_paths:
+        # Only touch if file exists or parent folder exists
+        if not config_path.exists() and not config_path.parent.exists():
+            continue
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_data = {}
+        if config_path.exists():
+            try:
+                config_data = json.loads(config_path.read_text(encoding="utf-8"))
+            except Exception:
+                config_data = {}
+
+        mcp_servers = config_data.setdefault("mcpServers", {})
+        mcp_servers.pop("tiktok-scraper", None)
+        mcp_servers["content-scrapper"] = {
+            "command": str(venv_python),
+            "args": [str(server_script)],
+        }
+
+        config_path.write_text(json.dumps(config_data, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"Updated Claude Desktop config: {config_path}")
+        updated_any = True
+
+    if not updated_any and config_paths:
+        # Fallback: create default path
+        primary_path = config_paths[0]
+        primary_path.parent.mkdir(parents=True, exist_ok=True)
+        config_data = {
+            "mcpServers": {
+                "content-scrapper": {
+                    "command": str(venv_python),
+                    "args": [str(server_script)],
+                }
+            }
+        }
+        primary_path.write_text(json.dumps(config_data, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"Created default Claude Desktop config: {primary_path}")
 
     # Also register to Claude Code CLI if available
     try:
