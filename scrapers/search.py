@@ -10,6 +10,10 @@ from utils.logging import get_logger
 
 logger = get_logger("search_scraper")
 
+# Per-page navigation timeout. 3 fallback strategies × this = max wall-clock.
+# Keep low so total stays well under Claude stream idle watchdog (300s).
+PAGE_TIMEOUT_MS = 10_000  # 10s per page load
+
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
@@ -100,7 +104,7 @@ class TikTokSearchScraper:
                 logger.info(f"Strategy 1: Direct search -> {search_url}")
 
                 try:
-                    await page.goto(search_url, wait_until="domcontentloaded", timeout=15000)
+                    await page.goto(search_url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
                     await page.wait_for_timeout(3000)
 
                     for scroll_idx in range(scroll_limit):
@@ -181,7 +185,7 @@ class TikTokSearchScraper:
                         logger.info(f"Navigating to hashtag page: {tag_url}")
 
                         try:
-                            await page.goto(tag_url, wait_until="domcontentloaded", timeout=15000)
+                            await page.goto(tag_url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
                             await page.wait_for_timeout(2500)
 
                             tag_cards = await page.evaluate("""() => {
@@ -237,7 +241,7 @@ class TikTokSearchScraper:
                 if len(results) < count:
                     logger.info("Strategy 3: Explore trending feed fallback...")
                     try:
-                        await page.goto("https://www.tiktok.com/explore", wait_until="domcontentloaded", timeout=15000)
+                        await page.goto("https://www.tiktok.com/explore", wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
                         await page.wait_for_timeout(2500)
 
                         explore_cards = await page.evaluate("""() => {

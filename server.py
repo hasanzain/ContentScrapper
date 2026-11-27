@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from typing import Any, Dict
 from mcp.server.fastmcp import FastMCP
@@ -8,6 +9,11 @@ from scrapers.mobile import TikTokMobileScraper
 from utils.logging import get_logger
 
 logger = get_logger("server")
+
+# MCP stream idle watchdog: Claude kills stream after 300s of silence.
+# Playwright worst-case: 3 fallbacks × 15s timeout = 45s.
+# Keep hard limit comfortably under 90s.
+SEARCH_TIMEOUT_SECONDS = 80
 
 # Initialize FastMCP Server
 mcp = FastMCP(
@@ -85,8 +91,21 @@ async def search_tiktok_videos(query: str, count: int = 10) -> Dict[str, Any]:
     """
     logger.info(f"Tool invocation: search_tiktok_videos for query='{query}' (count={count})")
     try:
-        result = await _search_scraper.search_videos(query=query, count=count)
+        result = await asyncio.wait_for(
+            _search_scraper.search_videos(query=query, count=count),
+            timeout=SEARCH_TIMEOUT_SECONDS,
+        )
         return result
+    except asyncio.TimeoutError:
+        logger.error(f"search_tiktok_videos timed out after {SEARCH_TIMEOUT_SECONDS}s for query='{query}'")
+        return {
+            "success": False,
+            "platform": "tiktok",
+            "query": query,
+            "count": 0,
+            "videos": [],
+            "error": f"Search timed out after {SEARCH_TIMEOUT_SECONDS}s. TikTok may be rate-limiting this IP. Try again in 1-2 minutes.",
+        }
     except Exception as exc:
         logger.error(f"Error in search_tiktok_videos tool: {exc}")
         return {
