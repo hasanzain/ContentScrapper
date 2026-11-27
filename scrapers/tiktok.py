@@ -1,4 +1,6 @@
+import random
 import re
+import time
 import urllib.request
 from typing import Any, Dict, List, Optional
 import yt_dlp
@@ -8,23 +10,36 @@ from utils.logging import get_logger, YtDlpStderrLogger
 
 logger = get_logger("tiktok_scraper")
 
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/128.0.0.0 Safari/537.36"
-)
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+]
 
 
 class TikTokScraper(BaseScraper):
-    """TikTok scraper powered by yt-dlp metadata extraction."""
+    """Resilient TikTok scraper powered by yt-dlp with anti-blocking defenses, retry, and caching."""
 
-    def __init__(self, user_agent: str = DEFAULT_USER_AGENT):
-        self.user_agent = user_agent
-        self.headers = {
-            "User-Agent": self.user_agent,
+    def __init__(self, cache_ttl: int = 900):
+        self.cache_ttl = cache_ttl
+        self._cache: Dict[str, tuple[float, Dict[str, Any]]] = {}
+        self._last_request_time = 0.0
+
+    def _get_headers(self) -> Dict[str, str]:
+        return {
+            "User-Agent": random.choice(USER_AGENTS),
             "Referer": "https://www.tiktok.com/",
             "Accept-Language": "en-US,en;q=0.9",
         }
+
+    def _throttle(self, min_interval: float = 1.0):
+        """Paces requests to avoid tripping TikTok IP burst rate limits."""
+        elapsed = time.time() - self._last_request_time
+        if elapsed < min_interval:
+            wait = min_interval - elapsed + random.uniform(0.2, 0.6)
+            time.sleep(wait)
+        self._last_request_time = time.time()
 
     def _get_ydl_opts(self) -> Dict[str, Any]:
         return {
@@ -33,116 +48,170 @@ class TikTokScraper(BaseScraper):
             "no_warnings": True,
             "writesubtitles": True,
             "writeautomaticsub": True,
-            "http_headers": self.headers,
+            "http_headers": self._get_headers(),
             "logger": YtDlpStderrLogger(),
             "extract_flat": False,
+            "extractor_retries": 3,
+            "file_access_retries": 3,
+            "sleep_interval": 1,
+            "max_sleep_interval": 2,
         }
 
     def scrape_video(self, url: str) -> Dict[str, Any]:
-        """Extract metadata for a TikTok video without downloading physical media."""
-        try:
-            ydl_opts = self._get_ydl_opts()
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                if not info:
-                    return {
-                        "success": False,
-                        "platform": "tiktok",
-                        "url": url,
-                        "error": "Failed to extract metadata: empty result",
-                    }
-                return self._normalize_video_data(url, info)
-        except Exception as exc:
-            logger.error(f"Error scraping TikTok video '{url}': {exc}")
-            return {
-                "success": False,
-                "platform": "tiktok",
-                "url": url,
-                "error": str(exc),
-            }
+        """Extract metadata for a TikTok video with caching and retry backoff."""
+        clean_url = url.split("?")[0].strip()
+        cache_key = f"video:{clean_url}"
+
+        if cache_key in self._cache:
+            cached_time, cached_val = self._cache[cache_key]
+            if time.time() - cached_time < self.cache_ttl:
+                logger.info(f"Returning cached video metadata for '{clean_url}'")
+                return cached_val
+
+        max_retries = 2
+        last_exc: Optional[Exception] = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                self._throttle()
+                ydl_opts = self._get_ydl_opts()
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    if not info:
+                        return {
+                            "success": False,
+                            "platform": "tiktok",
+                            "url": url,
+                            "error": "Failed to extract metadata: empty result",
+                        }
+                    res = self._normalize_video_data(url, info)
+                    self._cache[cache_key] = (time.time(), res)
+                    return res
+
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(f"Scrape video attempt {attempt + 1}/{max_retries + 1} failed for '{url}': {exc}")
+                if attempt < max_retries:
+                    sleep_time = (2 ** attempt) + random.uniform(0.5, 1.5)
+                    time.sleep(sleep_time)
+
+        logger.error(f"Error scraping TikTok video '{url}' after {max_retries + 1} attempts: {last_exc}")
+        return {
+            "success": False,
+            "platform": "tiktok",
+            "url": url,
+            "error": str(last_exc),
+        }
 
     def get_transcript(self, url: str) -> Dict[str, Any]:
-        """Extract transcript/captions for a TikTok video."""
-        try:
-            ydl_opts = self._get_ydl_opts()
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                if not info:
-                    return {
-                        "success": False,
-                        "platform": "tiktok",
-                        "url": url,
-                        "available": False,
-                        "segments": [],
-                        "text": "",
-                        "error": "Failed to extract video info",
-                    }
+        """Extract transcript/captions for a TikTok video with caching and retry backoff."""
+        clean_url = url.split("?")[0].strip()
+        cache_key = f"transcript:{clean_url}"
 
-                subtitles = info.get("subtitles") or {}
-                auto_subtitles = info.get("automatic_captions") or {}
-                all_subs = {**subtitles, **auto_subtitles}
+        if cache_key in self._cache:
+            cached_time, cached_val = self._cache[cache_key]
+            if time.time() - cached_time < self.cache_ttl:
+                logger.info(f"Returning cached transcript for '{clean_url}'")
+                return cached_val
 
-                if not all_subs:
-                    return {
-                        "success": True,
-                        "platform": "tiktok",
-                        "url": url,
-                        "available": False,
-                        "language": None,
-                        "segments": [],
-                        "text": "",
-                    }
+        max_retries = 2
+        last_exc: Optional[Exception] = None
 
-                # Find first available subtitle track
-                chosen_lang = None
-                chosen_url = None
-                for lang, formats in all_subs.items():
-                    for f in formats:
-                        if f.get("url"):
-                            chosen_lang = lang
-                            chosen_url = f.get("url")
+        for attempt in range(max_retries + 1):
+            try:
+                self._throttle()
+                ydl_opts = self._get_ydl_opts()
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    if not info:
+                        return {
+                            "success": False,
+                            "platform": "tiktok",
+                            "url": url,
+                            "available": False,
+                            "segments": [],
+                            "text": "",
+                            "error": "Failed to extract video info",
+                        }
+
+                    subtitles = info.get("subtitles") or {}
+                    auto_subtitles = info.get("automatic_captions") or {}
+                    all_subs = {**subtitles, **auto_subtitles}
+
+                    if not all_subs:
+                        res = {
+                            "success": True,
+                            "platform": "tiktok",
+                            "url": url,
+                            "available": False,
+                            "language": None,
+                            "segments": [],
+                            "text": "",
+                        }
+                        self._cache[cache_key] = (time.time(), res)
+                        return res
+
+                    # Find first available subtitle track
+                    chosen_lang = None
+                    chosen_url = None
+                    for lang, formats in all_subs.items():
+                        for f in formats:
+                            if f.get("url"):
+                                chosen_lang = lang
+                                chosen_url = f.get("url")
+                                break
+                        if chosen_url:
                             break
-                    if chosen_url:
-                        break
 
-                if not chosen_url:
-                    return {
+                    if not chosen_url:
+                        res = {
+                            "success": True,
+                            "platform": "tiktok",
+                            "url": url,
+                            "available": False,
+                            "language": None,
+                            "segments": [],
+                            "text": "",
+                        }
+                        self._cache[cache_key] = (time.time(), res)
+                        return res
+
+                    # Fetch and parse subtitle content
+                    vtt_text = self._fetch_url_content(chosen_url)
+                    segments, full_text = self._parse_vtt(vtt_text)
+
+                    res = {
                         "success": True,
                         "platform": "tiktok",
                         "url": url,
-                        "available": False,
-                        "language": None,
-                        "segments": [],
-                        "text": "",
+                        "available": len(segments) > 0,
+                        "language": chosen_lang,
+                        "segments": segments,
+                        "text": full_text,
                     }
+                    self._cache[cache_key] = (time.time(), res)
+                    return res
 
-                # Fetch and parse subtitle content
-                vtt_text = self._fetch_url_content(chosen_url)
-                segments, full_text = self._parse_vtt(vtt_text)
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(f"Get transcript attempt {attempt + 1}/{max_retries + 1} failed for '{url}': {exc}")
+                if attempt < max_retries:
+                    sleep_time = (2 ** attempt) + random.uniform(0.5, 1.5)
+                    time.sleep(sleep_time)
 
-                return {
-                    "success": True,
-                    "platform": "tiktok",
-                    "url": url,
-                    "available": len(segments) > 0,
-                    "language": chosen_lang,
-                    "segments": segments,
-                    "text": full_text,
-                }
-        except Exception as exc:
-            logger.error(f"Error getting transcript for '{url}': {exc}")
-            return {
-                "success": False,
-                "platform": "tiktok",
-                "url": url,
-                "available": False,
-                "segments": [],
-                "text": "",
-                "error": str(exc),
-            }
+        logger.error(f"Error getting transcript for '{url}': {last_exc}")
+        return {
+            "success": False,
+            "platform": "tiktok",
+            "url": url,
+            "available": False,
+            "segments": [],
+            "text": "",
+            "error": str(last_exc),
+        }
 
     def _fetch_url_content(self, url: str) -> str:
-        req = urllib.request.Request(url, headers=self.headers)
+        req = urllib.request.Request(url, headers=self._get_headers())
         with urllib.request.urlopen(req, timeout=15) as resp:
             return resp.read().decode("utf-8", errors="replace")
 
@@ -220,42 +289,30 @@ class TikTokScraper(BaseScraper):
         likes = info.get("like_count")
         comments = info.get("comment_count")
         shares = info.get("repost_count")
-        favorites = info.get("save_count")
 
-        # Video media details
+        # Media and stream formats
         duration = info.get("duration")
         width = info.get("width")
         height = info.get("height")
-        thumbnail_url = info.get("thumbnail")
+        thumbnail = info.get("thumbnail")
         direct_url = info.get("url")
 
-        # Formats list
-        raw_formats = info.get("formats") or []
-        formats: List[Dict[str, Any]] = []
-        for f in raw_formats:
-            formats.append({
-                "format_id": f.get("format_id"),
-                "url": f.get("url"),
-                "ext": f.get("ext"),
-                "width": f.get("width"),
-                "height": f.get("height"),
-                "vcodec": f.get("vcodec"),
-                "acodec": f.get("acodec"),
-                "filesize": f.get("filesize"),
-                "quality": f.get("quality"),
-            })
+        formats_list = []
+        for fmt in info.get("formats", []):
+            if fmt.get("url"):
+                formats_list.append({
+                    "format_id": fmt.get("format_id"),
+                    "url": fmt.get("url"),
+                    "ext": fmt.get("ext"),
+                    "width": fmt.get("width"),
+                    "height": fmt.get("height"),
+                    "vcodec": fmt.get("vcodec"),
+                    "acodec": fmt.get("acodec"),
+                })
 
         # Sound information
-        sound_title = info.get("track")
-        sound_author = info.get("artist")
-        sound_id = None
-        sound_url = None
-
-        timestamp = None
-        if info.get("timestamp"):
-            timestamp = str(info.get("timestamp"))
-        elif info.get("upload_date"):
-            timestamp = str(info.get("upload_date"))
+        sound_title = info.get("track") or info.get("alt_title") or "original sound"
+        sound_author = info.get("artist") or creator_display or None
 
         return {
             "success": True,
@@ -270,31 +327,27 @@ class TikTokScraper(BaseScraper):
                 "avatar_url": None,
             },
             "statistics": {
-                "views": views if views is not None else 0,
-                "likes": likes if likes is not None else 0,
-                "comments": comments if comments is not None else 0,
-                "shares": shares if shares is not None else 0,
+                "views": views,
+                "likes": likes,
+                "comments": comments,
+                "shares": shares,
                 "downloads": 0,
-                "favorites": favorites if favorites is not None else 0,
+                "favorites": None,
             },
             "video": {
-                "duration": duration if duration is not None else 0,
-                "width": width if width is not None else 0,
-                "height": height if height is not None else 0,
-                "thumbnail_url": thumbnail_url,
+                "duration": duration,
+                "width": width,
+                "height": height,
+                "thumbnail_url": thumbnail,
                 "direct_url": direct_url,
-                "formats": formats,
+                "formats": formats_list,
             },
             "sound": {
                 "title": sound_title,
                 "author": sound_author,
-                "id": sound_id,
-                "url": sound_url,
+                "id": None,
+                "url": None,
             },
-            "timestamp": timestamp,
-            "raw": {
-                "extractor": info.get("extractor"),
-                "webpage_url": info.get("webpage_url"),
-                "subtitles": list((info.get("subtitles") or {}).keys()),
-            },
+            "timestamp": str(info.get("timestamp")) if info.get("timestamp") else None,
+            "raw": {},
         }

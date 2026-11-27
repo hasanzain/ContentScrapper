@@ -12,7 +12,7 @@ logger = get_logger("server")
 # Initialize FastMCP Server
 mcp = FastMCP(
     "content-scrapper",
-    dependencies=["yt-dlp", "httpx", "playwright"],
+    dependencies=["yt-dlp", "httpx", "playwright", "curl-cffi"],
 )
 
 # Global scraper instances
